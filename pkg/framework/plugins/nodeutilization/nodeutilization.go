@@ -756,13 +756,13 @@ func assessAvailableResourceInNodes(
 }
 
 // withResourceRequestForAny returns a filter function that checks if a pod
-// has a resource request specified for any of the given resources names.
+// has a non-zero resource request specified for any of the given resources names.
 func withResourceRequestForAny(names ...v1.ResourceName) pod.FilterFunc {
 	return func(pod *v1.Pod) bool {
 		all := append(pod.Spec.Containers, pod.Spec.InitContainers...)
 		for _, name := range names {
 			for _, container := range all {
-				if _, ok := container.Resources.Requests[name]; ok {
+				if val, ok := container.Resources.Requests[name]; ok && !val.IsZero() {
 					return true
 				}
 			}
