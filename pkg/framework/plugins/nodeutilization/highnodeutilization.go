@@ -223,8 +223,8 @@ func (h *HighNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fr
 		return nil
 	}
 
-	// Determine available nodes for pod placement
 	availableNodes := schedulableNodes
+	sortNodesByUsage(lowNodes, true)
 	if h.args.UseLowNodesAsTargets {
 		// When UseLowNodesAsTargets is enabled, move some low utilization nodes
 		// from the eviction source list to the target list. This allows pods to
@@ -264,11 +264,7 @@ func (h *HighNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fr
 		// Only proceed if we have at least 3 schedulable low nodes.
 		// Two nodes is likely to lead to 'bouncing' pods back and forth.
 		if len(schedulableLowNodes) > 2 {
-			// Sort by node name first to ensure deterministic selection when nodes have equal usage
-			sortNodesByName(schedulableLowNodes)
-
 			// evict from the lowest usage nodes
-			sortNodesByUsage(schedulableLowNodes, true)
 			numTargetNodes := len(schedulableLowNodes) / 2
 			targetNodes := schedulableLowNodes[len(schedulableLowNodes)-numTargetNodes:]
 			schedulableLowNodes = schedulableLowNodes[:len(schedulableLowNodes)-numTargetNodes]
@@ -282,13 +278,7 @@ func (h *HighNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fr
 				"lowNodesAsSource", len(lowNodes),
 				"totalAvailableNodes", len(availableNodes),
 			)
-		} else {
-			// Not enough schedulable low nodes, just sort all low nodes
-			sortNodesByUsage(lowNodes, true)
 		}
-	} else {
-		// sorts the nodes by the usage in ascending order.
-		sortNodesByUsage(lowNodes, true)
 	}
 
 	if len(lowNodes) <= h.args.NumberOfNodes {

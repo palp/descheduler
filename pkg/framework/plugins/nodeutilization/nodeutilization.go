@@ -375,14 +375,12 @@ func subtractPodUsageFromNodeAvailability(
 	}
 }
 
-func sortNodesByName(nodes []NodeInfo) {
+// sortNodesByUsage sorts nodes based on usage according to the given plugin.
+func sortNodesByUsage(nodes []NodeInfo, ascending bool) {
+	// Sort by name first to make sort order stable between runs
 	sort.Slice(nodes, func(i, j int) bool {
 		return nodes[i].node.Name < nodes[j].node.Name
 	})
-}
-
-// sortNodesByUsage sorts nodes based on usage according to the given plugin.
-func sortNodesByUsage(nodes []NodeInfo, ascending bool) {
 	sort.Slice(nodes, func(i, j int) bool {
 		ti := resource.NewQuantity(0, resource.DecimalSI).Value()
 		tj := resource.NewQuantity(0, resource.DecimalSI).Value()
