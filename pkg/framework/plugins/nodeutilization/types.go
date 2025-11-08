@@ -71,6 +71,12 @@ type HighNodeUtilizationArgs struct {
 	// considered while considering resources used by pods
 	// but then filtered out before eviction
 	EvictableNamespaces *api.Namespaces `json:"evictableNamespaces,omitempty"`
+
+	// UseLowNodesAsTargets when set to true, allows low utilization nodes
+	// to be used as eviction targets in addition to being eviction sources.
+	// This enables pods to be moved between underutilized nodes to further
+	// consolidate workloads.
+	UseLowNodesAsTargets bool `json:"useLowNodesAsTargets,omitempty"`
 }
 
 // MetricsUtilization allow to consume actual resource utilization from metrics

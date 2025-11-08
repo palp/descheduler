@@ -223,6 +223,61 @@ func (h *HighNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fr
 		return nil
 	}
 
+	// Determine available nodes for pod placement
+	availableNodes := schedulableNodes
+	if h.args.UseLowNodesAsTargets && len(lowNodes) > 1 {
+		// When UseLowNodesAsTargets is enabled, move some low utilization nodes
+		// from the eviction source list to the target list. This allows pods to
+		// be consolidated onto these nodes while evicting from the remaining
+		// low utilization nodes.
+		// We need at least 2 low nodes for this to work (one to evict from, one to target)
+
+		// First, filter out unschedulable nodes from lowNodes
+		schedulableLowNodes := []NodeInfo{}
+		unschedulableLowNodes := []NodeInfo{}
+		for _, nodeInfo := range lowNodes {
+			if nodeutil.IsNodeUnschedulable(nodeInfo.node) {
+				unschedulableLowNodes = append(unschedulableLowNodes, nodeInfo)
+			} else {
+				schedulableLowNodes = append(schedulableLowNodes, nodeInfo)
+			}
+		}
+
+		// Only proceed if we have at least 2 schedulable low nodes
+		if len(schedulableLowNodes) > 1 {
+			// Sort schedulable low nodes by usage in ascending order first, so we can identify
+			// which nodes have the highest usage among the low utilization nodes
+			sortNodesByUsage(schedulableLowNodes, true)
+
+			// Calculate how many low nodes to use as targets (half of them)
+			numTargetNodes := len(schedulableLowNodes) / 2
+
+			// Move the last numTargetNodes from schedulableLowNodes to availableNodes
+			// These are the nodes with the highest usage among low nodes, so we
+			// minimize evictions by consolidating onto them
+			targetNodes := schedulableLowNodes[len(schedulableLowNodes)-numTargetNodes:]
+			schedulableLowNodes = schedulableLowNodes[:len(schedulableLowNodes)-numTargetNodes]
+			availableNodes = append(availableNodes, targetNodes...)
+
+			// Reconstruct lowNodes with remaining schedulable nodes and all unschedulable nodes
+			lowNodes = append(schedulableLowNodes, unschedulableLowNodes...)
+
+			logger.V(1).Info(
+				"Using low utilization nodes as targets",
+				"schedulableNodes", len(schedulableNodes),
+				"lowNodesAsTargets", numTargetNodes,
+				"lowNodesAsSource", len(lowNodes),
+				"totalAvailableNodes", len(availableNodes),
+			)
+		} else {
+			// Not enough schedulable low nodes, just sort all low nodes
+			sortNodesByUsage(lowNodes, true)
+		}
+	} else {
+		// sorts the nodes by the usage in ascending order.
+		sortNodesByUsage(lowNodes, true)
+	}
+
 	if len(lowNodes) <= h.args.NumberOfNodes {
 		logger.V(1).Info(
 			"Number of nodes underutilized is less or equal than NumberOfNodes, nothing to do here",
@@ -237,7 +292,7 @@ func (h *HighNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fr
 		return nil
 	}
 
-	if len(schedulableNodes) == 0 {
+	if len(availableNodes) == 0 {
 		logger.V(1).Info("No node is available to schedule the pods, nothing to do here")
 		return nil
 	}
@@ -254,14 +309,11 @@ func (h *HighNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fr
 		return true
 	}
 
-	// sorts the nodes by the usage in ascending order.
-	sortNodesByUsage(lowNodes, true)
-
 	evictPodsFromSourceNodes(
 		ctx,
 		h.args.EvictableNamespaces,
 		lowNodes,
-		schedulableNodes,
+		availableNodes,
 		h.handle.Evictor(),
 		evictions.EvictOptions{StrategyName: HighNodeUtilizationPluginName},
 		h.podFilter,

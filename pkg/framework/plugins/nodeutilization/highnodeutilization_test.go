@@ -46,13 +46,14 @@ func TestHighNodeUtilization(t *testing.T) {
 	nodeSelectorValue := "west"
 
 	testCases := []struct {
-		name                string
-		thresholds          api.ResourceThresholds
-		evictionModes       []EvictionMode
-		nodes               []*v1.Node
-		pods                []*v1.Pod
-		expectedPodsEvicted uint
-		evictedPods         []string
+		name                 string
+		thresholds           api.ResourceThresholds
+		evictionModes        []EvictionMode
+		useLowNodesAsTargets bool
+		nodes                []*v1.Node
+		pods                 []*v1.Pod
+		expectedPodsEvicted  uint
+		evictedPods          []string
 	}{
 		{
 			name: "no node below threshold usage",
@@ -481,6 +482,106 @@ func TestHighNodeUtilization(t *testing.T) {
 			},
 			expectedPodsEvicted: 0,
 		},
+		{
+			name: "UseLowNodesAsTargets with 4 low nodes",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  30,
+				v1.ResourcePods: 30,
+			},
+			useLowNodesAsTargets: true,
+			nodes: []*v1.Node{
+				// 4 low utilization nodes with different usage levels
+				test.BuildTestNode(n1NodeName, 4000, 3000, 10, nil), // Will have ~10% CPU usage
+				test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil), // Will have ~20% CPU usage
+				test.BuildTestNode(n3NodeName, 4000, 3000, 10, nil), // Will have ~25% CPU usage
+				test.BuildTestNode("n4", 4000, 3000, 10, nil),       // Will have ~27.5% CPU usage
+			},
+			pods: []*v1.Pod{
+				// n1: 10% CPU usage (400/4000)
+				test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+				// n2: 20% CPU usage (800/4000)
+				test.BuildTestPod("p2", 400, 0, n2NodeName, test.SetRSOwnerRef),
+				test.BuildTestPod("p3", 400, 0, n2NodeName, test.SetRSOwnerRef),
+				// n3: 25% CPU usage (1000/4000)
+				test.BuildTestPod("p4", 500, 0, n3NodeName, test.SetRSOwnerRef),
+				test.BuildTestPod("p5", 500, 0, n3NodeName, test.SetRSOwnerRef),
+				// n4: 27.5% CPU usage (1100/4000)
+				test.BuildTestPod("p6", 550, 0, "n4", test.SetRSOwnerRef),
+				test.BuildTestPod("p7", 550, 0, "n4", test.SetRSOwnerRef),
+			},
+			// With UseLowNodesAsTargets, half of low nodes (2) become targets
+			// The 2 highest usage nodes (n3, n4) become targets
+			// Evictions happen from the 2 lowest usage nodes (n1, n2)
+			expectedPodsEvicted: 3,
+			evictedPods:         []string{"p1", "p2", "p3"},
+		},
+		{
+			name: "UseLowNodesAsTargets with only 2 low nodes",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  30,
+				v1.ResourcePods: 30,
+			},
+			useLowNodesAsTargets: true,
+			nodes: []*v1.Node{
+				test.BuildTestNode(n1NodeName, 4000, 3000, 10, nil), // 10% CPU usage
+				test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil), // 20% CPU usage
+			},
+			pods: []*v1.Pod{
+				test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+				test.BuildTestPod("p2", 400, 0, n2NodeName, test.SetRSOwnerRef),
+				test.BuildTestPod("p3", 400, 0, n2NodeName, test.SetRSOwnerRef),
+			},
+			// With 2 low nodes, half (1) becomes target (n2 with higher usage)
+			// Evictions happen from n1 (lower usage)
+			expectedPodsEvicted: 1,
+			evictedPods:         []string{"p1"},
+		},
+		{
+			name: "UseLowNodesAsTargets with only 1 low node",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  30,
+				v1.ResourcePods: 30,
+			},
+			useLowNodesAsTargets: true,
+			nodes: []*v1.Node{
+				test.BuildTestNode(n1NodeName, 4000, 3000, 10, nil),
+				test.BuildTestNode(n2NodeName, 4000, 3000, 10, test.SetNodeUnschedulable),
+			},
+			pods: []*v1.Pod{
+				test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+				test.BuildTestPod("p2", 400, 0, n2NodeName, test.SetRSOwnerRef),
+			},
+			// With only 1 low node, UseLowNodesAsTargets doesn't apply
+			// No evictions because there's no schedulable target
+			expectedPodsEvicted: 0,
+		},
+		{
+			name: "UseLowNodesAsTargets with low nodes and schedulable nodes",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  30,
+				v1.ResourcePods: 30,
+			},
+			useLowNodesAsTargets: true,
+			nodes: []*v1.Node{
+				// 2 low utilization nodes
+				test.BuildTestNode(n1NodeName, 4000, 3000, 10, nil), // 10% CPU usage
+				test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil), // 20% CPU usage
+				// 1 schedulable node (above threshold)
+				test.BuildTestNode(n3NodeName, 4000, 3000, 10, nil), // 40% CPU usage
+			},
+			pods: []*v1.Pod{
+				test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+				test.BuildTestPod("p2", 400, 0, n2NodeName, test.SetRSOwnerRef),
+				test.BuildTestPod("p3", 400, 0, n2NodeName, test.SetRSOwnerRef),
+				test.BuildTestPod("p4", 800, 0, n3NodeName, test.SetRSOwnerRef),
+				test.BuildTestPod("p5", 800, 0, n3NodeName, test.SetRSOwnerRef),
+			},
+			// With 2 low nodes, half (1) becomes target (n2)
+			// Plus n3 is already schedulable
+			// Evictions happen from n1
+			expectedPodsEvicted: 1,
+			evictedPods:         []string{"p1"},
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -525,8 +626,9 @@ func TestHighNodeUtilization(t *testing.T) {
 			plugin, err := NewHighNodeUtilization(
 				ctx,
 				&HighNodeUtilizationArgs{
-					Thresholds:    testCase.thresholds,
-					EvictionModes: testCase.evictionModes,
+					Thresholds:           testCase.thresholds,
+					EvictionModes:        testCase.evictionModes,
+					UseLowNodesAsTargets: testCase.useLowNodesAsTargets,
 				},
 				handle,
 			)
