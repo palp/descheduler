@@ -264,8 +264,9 @@ func (h *HighNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fr
 			}
 		}
 
-		// Only proceed if we have at least 2 schedulable low nodes
-		if len(schedulableLowNodes) > 1 {
+		// Only proceed if we have at least 3 schedulable low nodes.
+		// Two nodes is likely to lead to 'bouncing' pods back and forth.
+		if len(schedulableLowNodes) > 2 {
 			// Sort by node name first to ensure deterministic selection when nodes have equal usage
 			slices.SortFunc(schedulableLowNodes, func(a, b NodeInfo) int {
 				if a.node.Name < b.node.Name {

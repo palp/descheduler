@@ -483,6 +483,43 @@ func TestHighNodeUtilization(t *testing.T) {
 			expectedPodsEvicted: 0,
 		},
 		{
+			name: "with extended resource threshold and zero resource requests",
+			thresholds: api.ResourceThresholds{
+				extendedResource: 40,
+			},
+			evictionModes: []EvictionMode{EvictionModeOnlyThresholdingResources},
+			nodes: []*v1.Node{
+				test.BuildTestNode(n1NodeName, 4000, 3000, 10, func(node *v1.Node) {
+					test.SetNodeExtendedResource(node, extendedResource, 10)
+				}),
+				test.BuildTestNode(n2NodeName, 4000, 3000, 10, func(node *v1.Node) {
+					test.SetNodeExtendedResource(node, extendedResource, 10)
+				}),
+				test.BuildTestNode(n3NodeName, 4000, 3000, 10, func(node *v1.Node) {
+					test.SetNodeExtendedResource(node, extendedResource, 10)
+				}),
+			},
+			pods: []*v1.Pod{
+				// pods on node2 have zero extended resource requests
+				// they should NOT be evicted even though the resource is in the threshold
+				test.BuildTestPod("p1", 500, 0, n2NodeName, func(pod *v1.Pod) {
+					test.SetRSOwnerRef(pod)
+					test.SetPodExtendedResourceRequest(pod, extendedResource, 0)
+				}),
+				test.BuildTestPod("p2", 500, 0, n2NodeName, func(pod *v1.Pod) {
+					test.SetRSOwnerRef(pod)
+					test.SetPodExtendedResourceRequest(pod, extendedResource, 0)
+				}),
+				// pods on node1 have non-zero extended resource requests
+				// but node1 is over-utilized, so no evictions
+				test.BuildTestPod("p3", 100, 0, n1NodeName, func(pod *v1.Pod) {
+					test.SetRSOwnerRef(pod)
+					test.SetPodExtendedResourceRequest(pod, extendedResource, 5)
+				}),
+			},
+			expectedPodsEvicted: 0,
+		},
+		{
 			name: "UseLowNodesAsTargets with 4 low nodes",
 			thresholds: api.ResourceThresholds{
 				v1.ResourceCPU:  30,
@@ -531,10 +568,9 @@ func TestHighNodeUtilization(t *testing.T) {
 				test.BuildTestPod("p2", 400, 0, n2NodeName, test.SetRSOwnerRef),
 				test.BuildTestPod("p3", 400, 0, n2NodeName, test.SetRSOwnerRef),
 			},
-			// With 2 low nodes, half (1) becomes target (n2 with higher usage)
-			// Evictions happen from n1 (lower usage)
-			expectedPodsEvicted: 1,
-			evictedPods:         []string{"p1"},
+			// With only 2 low nodes, UseLowNodesAsTargets doesn't apply (need > 2)
+			// No evictions because there's no schedulable target
+			expectedPodsEvicted: 0,
 		},
 		{
 			name: "UseLowNodesAsTargets with only 1 low node",
@@ -576,11 +612,11 @@ func TestHighNodeUtilization(t *testing.T) {
 				test.BuildTestPod("p4", 800, 0, n3NodeName, test.SetRSOwnerRef),
 				test.BuildTestPod("p5", 800, 0, n3NodeName, test.SetRSOwnerRef),
 			},
-			// With 2 low nodes, half (1) becomes target (n2)
-			// Plus n3 is already schedulable
-			// Evictions happen from n1
-			expectedPodsEvicted: 1,
-			evictedPods:         []string{"p1"},
+			// With only 2 low nodes, UseLowNodesAsTargets doesn't apply (need > 2)
+			// But we still have n3 as a schedulable target
+			// All pods from n1 and n2 can be evicted to n3
+			expectedPodsEvicted: 3,
+			evictedPods:         []string{"p1", "p2", "p3"},
 		},
 		{
 			name: "UseLowNodesAsTargets with nodes having zero utilization",
@@ -601,11 +637,12 @@ func TestHighNodeUtilization(t *testing.T) {
 				test.BuildTestPod("p3", 400, 0, n2NodeName, test.SetRSOwnerRef),
 				// n3 has no pods, so it has zero utilization
 			},
-			// n3 has zero utilization, so it should not be used as a target
-			// Only n1 and n2 are eligible, so n2 (higher usage) becomes target
-			// Evictions happen from n1
-			expectedPodsEvicted: 1,
-			evictedPods:         []string{"p1"},
+			// With 3 low nodes, UseLowNodesAsTargets applies (3 > 2)
+			// n3 has zero utilization for ALL resources, so it's excluded from being a target
+			// Only n1 and n2 are eligible, but we need > 2 eligible nodes
+			// So UseLowNodesAsTargets doesn't apply after filtering
+			// No evictions because there's no schedulable target
+			expectedPodsEvicted: 0,
 		},
 	}
 
