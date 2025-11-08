@@ -577,3 +577,198 @@ func TestNormalizeAndClassify(t *testing.T) {
 		})
 	}
 }
+
+func TestWithResourceRequestForAny(t *testing.T) {
+	tests := []struct {
+		name           string
+		pod            *v1.Pod
+		resourceNames  []v1.ResourceName
+		expectedResult bool
+	}{
+		{
+			name: "pod with non-zero CPU request",
+			pod: &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceCPU: resource.MustParse("100m"),
+								},
+							},
+						},
+					},
+				},
+			},
+			resourceNames:  []v1.ResourceName{v1.ResourceCPU},
+			expectedResult: true,
+		},
+		{
+			name: "pod with zero CPU request",
+			pod: &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceCPU: resource.MustParse("0"),
+								},
+							},
+						},
+					},
+				},
+			},
+			resourceNames:  []v1.ResourceName{v1.ResourceCPU},
+			expectedResult: false,
+		},
+		{
+			name: "pod with no CPU request",
+			pod: &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{},
+							},
+						},
+					},
+				},
+			},
+			resourceNames:  []v1.ResourceName{v1.ResourceCPU},
+			expectedResult: false,
+		},
+		{
+			name: "pod with non-zero extended resource request",
+			pod: &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									extendedResource: resource.MustParse("1"),
+								},
+							},
+						},
+					},
+				},
+			},
+			resourceNames:  []v1.ResourceName{extendedResource},
+			expectedResult: true,
+		},
+		{
+			name: "pod with zero extended resource request",
+			pod: &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									extendedResource: resource.MustParse("0"),
+								},
+							},
+						},
+					},
+				},
+			},
+			resourceNames:  []v1.ResourceName{extendedResource},
+			expectedResult: false,
+		},
+		{
+			name: "pod with multiple containers, one with non-zero request",
+			pod: &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceCPU: resource.MustParse("0"),
+								},
+							},
+						},
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceCPU: resource.MustParse("100m"),
+								},
+							},
+						},
+					},
+				},
+			},
+			resourceNames:  []v1.ResourceName{v1.ResourceCPU},
+			expectedResult: true,
+		},
+		{
+			name: "pod with init container with non-zero request",
+			pod: &v1.Pod{
+				Spec: v1.PodSpec{
+					InitContainers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceMemory: resource.MustParse("100Mi"),
+								},
+							},
+						},
+					},
+					Containers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{},
+							},
+						},
+					},
+				},
+			},
+			resourceNames:  []v1.ResourceName{v1.ResourceMemory},
+			expectedResult: true,
+		},
+		{
+			name: "pod checking multiple resources, has one",
+			pod: &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceCPU: resource.MustParse("100m"),
+								},
+							},
+						},
+					},
+				},
+			},
+			resourceNames:  []v1.ResourceName{v1.ResourceCPU, v1.ResourceMemory},
+			expectedResult: true,
+		},
+		{
+			name: "pod checking multiple resources, has zero for one",
+			pod: &v1.Pod{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{
+									v1.ResourceCPU:    resource.MustParse("0"),
+									v1.ResourceMemory: resource.MustParse("100Mi"),
+								},
+							},
+						},
+					},
+				},
+			},
+			resourceNames:  []v1.ResourceName{v1.ResourceCPU, v1.ResourceMemory},
+			expectedResult: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter := withResourceRequestForAny(tt.resourceNames...)
+			result := filter(tt.pod)
+			if result != tt.expectedResult {
+				t.Errorf("Expected %v, got %v", tt.expectedResult, result)
+			}
+		})
+	}
+}

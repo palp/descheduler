@@ -377,6 +377,10 @@ func subtractPodUsageFromNodeAvailability(
 
 // sortNodesByUsage sorts nodes based on usage according to the given plugin.
 func sortNodesByUsage(nodes []NodeInfo, ascending bool) {
+	// Sort by name first to make sort order stable between runs
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].node.Name < nodes[j].node.Name
+	})
 	sort.Slice(nodes, func(i, j int) bool {
 		ti := resource.NewQuantity(0, resource.DecimalSI).Value()
 		tj := resource.NewQuantity(0, resource.DecimalSI).Value()
@@ -756,13 +760,13 @@ func assessAvailableResourceInNodes(
 }
 
 // withResourceRequestForAny returns a filter function that checks if a pod
-// has a resource request specified for any of the given resources names.
+// has a non-zero resource request specified for any of the given resources names.
 func withResourceRequestForAny(names ...v1.ResourceName) pod.FilterFunc {
 	return func(pod *v1.Pod) bool {
 		all := append(pod.Spec.Containers, pod.Spec.InitContainers...)
 		for _, name := range names {
 			for _, container := range all {
-				if _, ok := container.Resources.Requests[name]; ok {
+				if val, ok := container.Resources.Requests[name]; ok && !val.IsZero() {
 					return true
 				}
 			}

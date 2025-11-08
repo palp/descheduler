@@ -459,6 +459,9 @@ For pods, this means the number of pods on the node as a fraction of the pod cap
 If a node's usage is below threshold for all (cpu, memory, number of pods and extended resources), the node is considered underutilized.
 Currently, pods request resource requirements are considered for computing node resource utilization.
 Any node above `thresholds` is considered appropriately utilized and is not considered for eviction.
+However, when `useLowNodesAsTargets` is set to `true`, underutilized nodes are also considered as targets for pod movement.
+This will only evict pods from 50% of the underutilized nodes, hoping to consolidate workloads onto the others.
+There must be more than 2 underutilized nodes for this feature to activate, to avoid bouncing pods between nodes.
 
 The `thresholds` param could be tuned as per your cluster requirements. Note that this
 strategy evicts pods from `underutilized nodes` (those with usage below `thresholds`)
@@ -485,6 +488,7 @@ actual usage metrics. Implementing metrics-based descheduling is currently TODO 
 |`numberOfNodes`|int|
 |`evictionModes`|list(string)|
 |`evictableNamespaces`|(see [namespace filtering](#namespace-filtering))|
+|`useLowNodesAsTargets`|bool|
 
 **Supported Eviction Modes:**
 
@@ -512,6 +516,7 @@ profiles:
           - "namespace1"
         evictionModes:
           - "OnlyThresholdingResources"
+        useLowNodesAsTargets: true
     plugins:
       balance:
         enabled:
