@@ -225,42 +225,39 @@ func (h *HighNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fr
 
 	// Determine available nodes for pod placement
 	availableNodes := schedulableNodes
-	if h.args.UseLowNodesAsTargets && len(lowNodes) > 1 {
+	if h.args.UseLowNodesAsTargets {
 		// When UseLowNodesAsTargets is enabled, move some low utilization nodes
 		// from the eviction source list to the target list. This allows pods to
 		// be consolidated onto these nodes while evicting from the remaining
 		// low utilization nodes.
-		// We need at least 2 low nodes for this to work (one to evict from, one to target)
 
-		// First, filter out unschedulable nodes and nodes with zero utilization from lowNodes
-		// Nodes with zero utilization for ALL tracked resources should not be used as targets
-		// since they're completely empty and we want to consolidate workloads
+		// Filter low nodes into schedulable and unschedulable groups
 		schedulableLowNodes := []NodeInfo{}
 		unschedulableLowNodes := []NodeInfo{}
 		for _, nodeInfo := range lowNodes {
 			if nodeutil.IsNodeUnschedulable(nodeInfo.node) {
 				unschedulableLowNodes = append(unschedulableLowNodes, nodeInfo)
-			} else {
-				// Check if ALL tracked resources (from thresholds) have zero utilization
-				allZeroUtilization := true
-				for resourceName := range h.args.Thresholds {
-					if quantity, exists := nodeInfo.usage[resourceName]; exists && !quantity.IsZero() {
-						allZeroUtilization = false
-						break
-					}
-				}
+				continue
+			}
 
-				if allZeroUtilization {
-					// Keep nodes with zero utilization as eviction sources only
-					logger.V(4).Info(
-						"Excluding node with zero utilization from being used as target",
-						"node", nodeInfo.node.Name,
-						"usage", nodeInfo.usage,
-					)
-					unschedulableLowNodes = append(unschedulableLowNodes, nodeInfo)
-				} else {
-					schedulableLowNodes = append(schedulableLowNodes, nodeInfo)
+			// Check if ALL tracked resources have zero utilization
+			allZeroUtilization := true
+			for resourceName := range h.args.Thresholds {
+				if quantity, exists := nodeInfo.usage[resourceName]; exists && !quantity.IsZero() {
+					allZeroUtilization = false
+					break
 				}
+			}
+
+			if allZeroUtilization {
+				logger.V(4).Info(
+					"Excluding node with zero utilization from being used as target",
+					"node", nodeInfo.node.Name,
+					"usage", nodeInfo.usage,
+				)
+				unschedulableLowNodes = append(unschedulableLowNodes, nodeInfo)
+			} else {
+				schedulableLowNodes = append(schedulableLowNodes, nodeInfo)
 			}
 		}
 
@@ -268,31 +265,14 @@ func (h *HighNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fr
 		// Two nodes is likely to lead to 'bouncing' pods back and forth.
 		if len(schedulableLowNodes) > 2 {
 			// Sort by node name first to ensure deterministic selection when nodes have equal usage
-			slices.SortFunc(schedulableLowNodes, func(a, b NodeInfo) int {
-				if a.node.Name < b.node.Name {
-					return -1
-				}
-				if a.node.Name > b.node.Name {
-					return 1
-				}
-				return 0
-			})
+			sortNodesByName(schedulableLowNodes)
 
-			// Then sort schedulable low nodes by usage in ascending order, so we can identify
-			// which nodes have the highest usage among the low utilization nodes
+			// evict from the lowest usage nodes
 			sortNodesByUsage(schedulableLowNodes, true)
-
-			// Calculate how many low nodes to use as targets (half of them)
 			numTargetNodes := len(schedulableLowNodes) / 2
-
-			// Move the last numTargetNodes from schedulableLowNodes to availableNodes
-			// These are the nodes with the highest usage among low nodes, so we
-			// minimize evictions by consolidating onto them
 			targetNodes := schedulableLowNodes[len(schedulableLowNodes)-numTargetNodes:]
 			schedulableLowNodes = schedulableLowNodes[:len(schedulableLowNodes)-numTargetNodes]
 			availableNodes = append(availableNodes, targetNodes...)
-
-			// Reconstruct lowNodes with remaining schedulable nodes and all unschedulable nodes
 			lowNodes = append(schedulableLowNodes, unschedulableLowNodes...)
 
 			logger.V(1).Info(
