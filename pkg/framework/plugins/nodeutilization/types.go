@@ -75,7 +75,7 @@ type HighNodeUtilizationArgs struct {
 	// UseLowNodesAsTargets when set to true, allows low utilization nodes
 	// to be used as eviction targets in addition to being eviction sources.
 	// This enables pods to be moved between underutilized nodes to further
-	// consolidate workloads.
+	// consolidate workloads onto fewer nodes.
 	UseLowNodesAsTargets bool `json:"useLowNodesAsTargets,omitempty"`
 }
 

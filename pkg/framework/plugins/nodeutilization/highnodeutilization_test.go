@@ -582,6 +582,31 @@ func TestHighNodeUtilization(t *testing.T) {
 			expectedPodsEvicted: 1,
 			evictedPods:         []string{"p1"},
 		},
+		{
+			name: "UseLowNodesAsTargets with nodes having zero utilization",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  30,
+				v1.ResourcePods: 30,
+			},
+			useLowNodesAsTargets: true,
+			nodes: []*v1.Node{
+				// 3 low utilization nodes, one with zero utilization
+				test.BuildTestNode(n1NodeName, 4000, 3000, 10, nil), // 10% CPU usage
+				test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil), // 20% CPU usage
+				test.BuildTestNode(n3NodeName, 4000, 3000, 10, nil), // 0% CPU usage (no pods)
+			},
+			pods: []*v1.Pod{
+				test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+				test.BuildTestPod("p2", 400, 0, n2NodeName, test.SetRSOwnerRef),
+				test.BuildTestPod("p3", 400, 0, n2NodeName, test.SetRSOwnerRef),
+				// n3 has no pods, so it has zero utilization
+			},
+			// n3 has zero utilization, so it should not be used as a target
+			// Only n1 and n2 are eligible, so n2 (higher usage) becomes target
+			// Evictions happen from n1
+			expectedPodsEvicted: 1,
+			evictedPods:         []string{"p1"},
+		},
 	}
 
 	for _, testCase := range testCases {

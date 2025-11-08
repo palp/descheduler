@@ -232,20 +232,52 @@ func (h *HighNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) *fr
 		// low utilization nodes.
 		// We need at least 2 low nodes for this to work (one to evict from, one to target)
 
-		// First, filter out unschedulable nodes from lowNodes
+		// First, filter out unschedulable nodes and nodes with zero utilization from lowNodes
+		// Nodes with zero utilization for ALL tracked resources should not be used as targets
+		// since they're completely empty and we want to consolidate workloads
 		schedulableLowNodes := []NodeInfo{}
 		unschedulableLowNodes := []NodeInfo{}
 		for _, nodeInfo := range lowNodes {
 			if nodeutil.IsNodeUnschedulable(nodeInfo.node) {
 				unschedulableLowNodes = append(unschedulableLowNodes, nodeInfo)
 			} else {
-				schedulableLowNodes = append(schedulableLowNodes, nodeInfo)
+				// Check if ALL tracked resources (from thresholds) have zero utilization
+				allZeroUtilization := true
+				for resourceName := range h.args.Thresholds {
+					if quantity, exists := nodeInfo.usage[resourceName]; exists && !quantity.IsZero() {
+						allZeroUtilization = false
+						break
+					}
+				}
+
+				if allZeroUtilization {
+					// Keep nodes with zero utilization as eviction sources only
+					logger.V(4).Info(
+						"Excluding node with zero utilization from being used as target",
+						"node", nodeInfo.node.Name,
+						"usage", nodeInfo.usage,
+					)
+					unschedulableLowNodes = append(unschedulableLowNodes, nodeInfo)
+				} else {
+					schedulableLowNodes = append(schedulableLowNodes, nodeInfo)
+				}
 			}
 		}
 
 		// Only proceed if we have at least 2 schedulable low nodes
 		if len(schedulableLowNodes) > 1 {
-			// Sort schedulable low nodes by usage in ascending order first, so we can identify
+			// Sort by node name first to ensure deterministic selection when nodes have equal usage
+			slices.SortFunc(schedulableLowNodes, func(a, b NodeInfo) int {
+				if a.node.Name < b.node.Name {
+					return -1
+				}
+				if a.node.Name > b.node.Name {
+					return 1
+				}
+				return 0
+			})
+
+			// Then sort schedulable low nodes by usage in ascending order, so we can identify
 			// which nodes have the highest usage among the low utilization nodes
 			sortNodesByUsage(schedulableLowNodes, true)
 
